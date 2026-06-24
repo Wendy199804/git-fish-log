@@ -1,0 +1,27 @@
+{
+  "name": "fish-git-stats",
+  "version": "1.0.0",
+  "description": "Git slack-off and stats analyzer CLI",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "fish": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  }
+}
