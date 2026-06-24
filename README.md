@@ -24,3 +24,11 @@
 因为：
 
 > 每一条 Commit，都是程序员留下的生活痕迹。
+
+配置/新增 GitLab 远程扫描源（支持多数据源管理）：
+  ```bash
+  fish config gitlab <token> [host] [name]
+  ```
+  * `token`: 你的 GitLab 个人/项目访问令牌 (PAT)，需有 `read_api` 或 `api` 权限。
+  * `host`: 可选。私有部署的 GitLab 域名（如 `https://gitlab.mycompany.com`），缺省默认使用 `https://gitlab.com`。
+  * `name`: 可选。给该数据源指定的别名（如 `my-company`），缺省时自动使用 host 域名作为别名。若别名已存在则会覆盖更新。
