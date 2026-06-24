@@ -1,20 +1,40 @@
 {
-  "name": "fish-git-stats",
+  "name": "git-fish-log",
   "version": "1.0.0",
-  "description": "Git slack-off and stats analyzer CLI",
+  "description": "🐟 Git 摸鱼 & 爆肝分析器 CLI — 给你的提交记录生成摸鱼指数和 AI 锐评",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
     "fish": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "git",
+    "cli",
+    "git-history",
+    "commit-analysis",
+    "developer-tools",
+    "productivity",
+    "humor",
+    "programmer-humor",
+    "git-stats",
+    "typescript",
+    "nodejs"
+  ],
+  "author": "Wendy199804",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Wendy199804/git-fish-log.git"
+  },
   "dependencies": {
     "chalk": "^5.6.2",
     "commander": "^15.0.0"
