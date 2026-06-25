@@ -1,6 +1,6 @@
 {
   "name": "git-fish-log",
-  "version": "1.0.2",
+  "version": "1.0.6",
   "description": "🐟 Git 摸鱼 & 爆肝分析器 CLI — 给你的提交记录生成摸鱼指数和 AI 锐评",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +9,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README-啰嗦版.md"
   ],
   "scripts": {
     "build": "tsup",

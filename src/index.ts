@@ -25,6 +25,17 @@ import { getAICritic, getAICriticForMonth } from './critic.js';
 
 const program = new Command();
 
+function getCliVersion(): string {
+  try {
+    const packageJson = JSON.parse(
+      fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+    ) as { version?: string };
+    return packageJson.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 // ── 可爱的 Loading 动画 ──
 const SPINNER_FRAMES = ['🐟  ', ' 🐠 ', '  🐡 ', ' 🦈 ', '  🐙 ', ' 🦑  '];
 function showLoading(message: string): { update: (msg: string) => void; stop: () => void } {
@@ -450,20 +461,32 @@ async function runMonthlyReport(monthsAgo: number, source?: string) {
     console.log('\n' + chalk.cyan.bold('📅 每日摸鱼指数概览：'));
     const monthLabel = `${targetDate.getMonth() + 1}月`;
     const COL_WIDTH = 8; // 每列固定宽度
+    const weekHeaders = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    const firstDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    const firstDayOffset = (firstDay.getDay() + 6) % 7; // 周一=0，周日=6
 
     const lines: string[] = [];
     let dateRow = '';
     let fishRow = '';
 
+    lines.push(chalk.gray(weekHeaders.map((d) => visualPad(d, COL_WIDTH)).join('').trimEnd()));
+
+    // 月初不是周一时补空列，保证日期落在正确星期下
+    for (let i = 0; i < firstDayOffset; i++) {
+      dateRow += visualPad('', COL_WIDTH);
+      fishRow += visualPad('', COL_WIDTH);
+    }
+
     for (const d of stats.dailyIndices) {
       const dateRaw = `${monthLabel}${d.day}日`;
       const fishRaw = `${d.fish}%`;
+      const columnIndex = (firstDayOffset + d.day - 1) % 7;
 
       dateRow += visualPad(dateRaw, COL_WIDTH);
       fishRow += visualPad(fishRaw, COL_WIDTH);
 
-      // 每 7 天换行
-      if (d.day % 7 === 0 || d === stats.dailyIndices[stats.dailyIndices.length - 1]) {
+      // 周日换行；最后一天即使不满一周也输出
+      if (columnIndex === 6 || d === stats.dailyIndices[stats.dailyIndices.length - 1]) {
         lines.push(chalk.gray(dateRow.trimEnd()));
         // 着色在 pad 之后进行，避免转义码破坏对齐
         fishRow = colorizeFishRow(fishRow);
@@ -640,7 +663,7 @@ async function runGhostReport(weeksAgo: number, source?: string) {
 program
   .name('fish')
   .description('🐟 Git 摸鱼 & 爆肝分析器 CLI')
-  .version('1.0.0')
+  .version(getCliVersion())
   .option('-m, --month [monthsAgo]', '查看摸鱼/爆肝月报 (默认 0 为本月，1 为上月，2 为上上月...)')
   .option('-p, --project', '查看项目爆肝排行')
   .option('-t, --time', '查看黄金摸鱼时间段 analysis (24小时分布)')
