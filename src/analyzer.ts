@@ -199,16 +199,16 @@ export function calculateDayIndices(
   // ── 各项基础得分（0 ~ 100）──
 
   // 1. Commit 活跃度
-  const commitScore = Math.min(100, Math.log2(N + 1) * 25);
+  const commitScore = Math.min(100, Math.log2(N + 1) * 18);
 
   // 2. 工时跨度得分
-  const spanScore = Math.min(100, Math.sqrt(S) * 25);
+  const spanScore = Math.min(100, Math.sqrt(S) * 18);
 
   // 3. 代码活跃度
-  const lineScore = Math.min(100, Math.log2(L + 1) * 12);
+  const lineScore = Math.min(100, Math.log2(L + 1) * 8);
 
   // 4. Commit 密度得分（N <= 1 时为 0）
-  const densityScore = N <= 1 ? 0 : Math.min(100, D * 50);
+  const densityScore = N <= 1 ? 0 : Math.min(100, D * 35);
 
   // 5. 修仙得分
   const nightScore = Math.min(100, nightCount * 30);
