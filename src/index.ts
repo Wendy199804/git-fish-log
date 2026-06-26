@@ -97,6 +97,23 @@ function formatOvertimeIndex(fish: number): string {
   }
 }
 
+function formatCodeVolume(totalLines: number): string {
+  if (totalLines <= 0) return '';
+  if (totalLines >= 1000) {
+    return chalk.red.bold(`${totalLines}行 (代码核爆 ☢️)`);
+  } else if (totalLines >= 500) {
+    return chalk.magenta(`${totalLines}行 (搬砖狂魔 🚚)`);
+  } else if (totalLines >= 200) {
+    return chalk.yellow(`${totalLines}行 (大型改动 🧱)`);
+  } else if (totalLines >= 80) {
+    return chalk.cyan(`${totalLines}行 (正常营业 📦)`);
+  } else if (totalLines >= 20) {
+    return chalk.green(`${totalLines}行 (缝缝补补 🔧)`);
+  } else {
+    return chalk.gray(`${totalLines}行 (小修小补 ✏️)`);
+  }
+}
+
 function getPersonalityTag(day: WeekDayStats): string | null {
   return day.tags.length > 0 ? day.tags.join(' ') : null;
 }
@@ -110,10 +127,10 @@ function colorizeTags(tagStr: string): string {
     '💥 一把梭哈型程序员': chalk.magenta,
     '🏷️ PPT 架构师': chalk.blue,
     '🏷️ 格式化大师': chalk.cyan,
-    '🏷️ Git 聊天达人': chalk.greenBright,
-    '🏷️ 深夜刺客': chalk.redBright,
-    '🏷️ 生产队的驴': chalk.yellowBright,
-    '🏷️ 摸鱼仙人': chalk.green.bold,
+    '💬 Git 聊天达人': chalk.greenBright,
+    '🌙 深夜刺客': chalk.redBright,
+    '🐴 生产队的驴': chalk.yellowBright,
+    '🐟 摸鱼仙人': chalk.green.bold,
     '🐟 今日暂无代码活动': chalk.green,
   };
   // 按 key 长度降序，确保 "💥 一把梭哈型程序员" 优先于短 key 匹配
@@ -269,7 +286,7 @@ function getHourTag(hour: number): string {
 }
 // ─────────────────────────────────────────────────────────────
 
-async function runWeeklyReport(weeksAgo: number, source?: string) {
+async function runWeeklyReport(weeksAgo: number, source?: string, showProjects: boolean = false) {
   const projects = getProjects();
   
   let timeTag = '';
@@ -324,7 +341,7 @@ async function runWeeklyReport(weeksAgo: number, source?: string) {
     } else {
       const projStr =
         day.projects.length > 0
-          ? ` | ${day.projects.length}个项目 (${day.projects.join(', ')})`
+          ? ` | ${day.projects.length}个项目${showProjects ? ` (${day.projects.join(', ')})` : ''}`
           : '';
       const commitStr = day.commitsCount > 0 ? chalk.white.bold(`${day.commitsCount} 次`) : '0 次';
 
@@ -335,6 +352,9 @@ async function runWeeklyReport(weeksAgo: number, source?: string) {
       } else {
         indices.push(`🐟 摸鱼指数: ${formatSlackIndex(day.fish)}`);
       }
+      if (day.totalLines > 0) {
+        indices.push(`🧱 代码量: ${formatCodeVolume(day.totalLines)}`);
+      }
       if (day.nightOwl >= 10) {
         const nightStr = formatNightOwlIndex(day.nightOwl);
         if (nightStr) indices.push(`🌙 修仙指数: ${nightStr}`);
@@ -342,11 +362,14 @@ async function runWeeklyReport(weeksAgo: number, source?: string) {
 
       const extraIndices = indices.length > 0 ? ` | ${indices.join(' | ')}` : '';
 
+      // 分支数
+      const branchStr = day.branchCount > 0 ? ` | 🌿 ${day.branchCount}个分支` : '';
+
       // 人格标签行
       const tag = getPersonalityTag(day);
       const tagStr = tag ? `  🏷 ${colorizeTags(tag)}` : '';
 
-      console.log(`  ${day.dayName}：${commitStr}${extraIndices}${projStr}${tagStr}`);
+      console.log(`  ${day.dayName}：${commitStr}${extraIndices}${projStr}${branchStr}${tagStr}`);
     }
   });
 
@@ -403,7 +426,7 @@ async function runWeeklyReport(weeksAgo: number, source?: string) {
     const avgNightStr = stats.averageNightOwl > 0
       ? ` | 🌙 修仙: ${stats.averageNightOwl}%`
       : '';
-    console.log(chalk.dim(`📊 本周均值：🐟 摸鱼 ${stats.averageFish}%${avgNightStr}`));
+    console.log(chalk.cyan.bold(`📊 本周均值：🐟 摸鱼指数 ${stats.averageFish}%${avgNightStr}`));
     console.log(chalk.gray('-'.repeat(50)));
     console.log(`🤖 ${chalk.magenta.bold('锐评')}：`);
     console.log(chalk.white(getAICritic(stats)));
@@ -669,6 +692,7 @@ program
   .option('-t, --time', '查看黄金摸鱼时间段 analysis (24小时分布)')
   .option('-g, --ghost', '检测深夜幽灵提交')
   .option('-w, --weeks-ago <number>', '查询几周前/月前的报告 (默认 0，即本周/本月)', '0')
+  .option('-P, --show-projects', '显示具体项目名称（默认隐藏）')
   .option('-s, --source <source>', '选择要查询的 GitLab 数据源 (序号或别名/host)')
   .action(async (options) => {
     const weeksAgo = parseInt(options.weeksAgo || '0', 10);
@@ -698,7 +722,7 @@ program
     } else if (options.ghost) {
       await runGhostReport(weeksAgo, source);
     } else {
-      await runWeeklyReport(weeksAgo, source);
+      await runWeeklyReport(weeksAgo, source, options.showProjects);
     }
   });
 

@@ -10,6 +10,8 @@ export interface CommitInfo {
   authorEmail: string;
   additions: number;
   deletions: number;
+  branch: string;
+  branches?: string[];
 }
 
 function getUserEmail(cwd: string): string | null {
@@ -40,6 +42,46 @@ function formatLocalDate(date: Date): string {
   return `${Y}-${M}-${D} ${h}:${m}:${s}`;
 }
 
+function cleanBranchRef(refName: string): string {
+  if (!refName) return 'unknown';
+  // refs/heads/main 或 refs/remotes/origin/main 格式
+  // 去掉 refs/heads/ 或 refs/remotes/origin/ 前缀，只保留分支名
+  return refName
+    .replace(/^refs\/heads\//, '')
+    .replace(/^refs\/remotes\/[^/]+\//, '')
+    .replace(/^HEAD -> /, '')
+    .replace(/^refs\//, '');
+}
+
+function shellQuote(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function getBranchRefs(projectPath: string): { ref: string; name: string }[] {
+  try {
+    const stdout = execSync('git for-each-ref --format="%(refname)" refs/heads refs/remotes', {
+      cwd: projectPath,
+      encoding: 'utf8',
+    });
+
+    const seen = new Set<string>();
+    return stdout
+      .replace(/\r/g, '')
+      .split('\n')
+      .map(ref => ref.trim())
+      .filter(ref => ref && !/\/HEAD$/.test(ref))
+      .map(ref => ({ ref, name: cleanBranchRef(ref) }))
+      .filter(({ name }) => name && name !== 'unknown')
+      .filter(({ name }) => {
+        if (seen.has(name)) return false;
+        seen.add(name);
+        return true;
+      });
+  } catch {
+    return [];
+  }
+}
+
 export function getCommitsForProject(
   projectPath: string,
   since: Date,
@@ -51,71 +93,81 @@ export function getCommitsForProject(
   const sinceStr = formatLocalDate(since);
   const untilStr = formatLocalDate(until);
 
-  let authorArg = '';
-  if (email) {
-    authorArg = `--author="${email.replace(/"/g, '\\"')}"`;
-  }
+  const authorArg = email ? ` --author=${shellQuote(email)}` : '';
 
   // Use a delimiter that is highly unlikely to appear in user names or messages.
   const delimiter = '|||';
   const formatStr = `%aI${delimiter}%an${delimiter}%ae${delimiter}%h${delimiter}%s`;
 
-  // --shortstat appends diff stats after each commit line
-  const cmd = `git log --all --since="${sinceStr}" --until="${untilStr}" ${authorArg} --pretty=format:"${formatStr}" --shortstat --date=iso-strict`;
+  const branchRefs = getBranchRefs(projectPath);
+  const refsToScan = branchRefs.length > 0
+    ? branchRefs
+    : [{ ref: '--all', name: 'unknown' }];
 
-  try {
-    const stdout = execSync(cmd, {
-      cwd: projectPath,
-      maxBuffer: 20 * 1024 * 1024, // 20MB buffer for large repos
-      encoding: 'utf8',
-    });
+  const results: CommitInfo[] = [];
 
-    if (!stdout.trim()) {
-      return [];
-    }
+  for (const branch of refsToScan) {
+    const refArg = branch.ref === '--all' ? '--all' : shellQuote(branch.ref);
+    const cmd = `git log ${refArg} --since=${shellQuote(sinceStr)} --until=${shellQuote(untilStr)}${authorArg} --pretty=format:${shellQuote(formatStr)} --shortstat --date=iso-strict`;
 
-    const lines = stdout.split('\n').map(l => l.trim());
+    try {
+      const stdout = execSync(cmd, {
+        cwd: projectPath,
+        maxBuffer: 20 * 1024 * 1024, // 20MB buffer for large repos
+        encoding: 'utf8',
+      });
 
-    const results: CommitInfo[] = [];
-    let currentCommit: CommitInfo | null = null;
-
-    for (const line of lines) {
-      if (line.length === 0) continue;
-
-      if (line.includes(delimiter)) {
-        // New commit line
-        if (currentCommit) {
-          results.push(currentCommit);
-        }
-        const parts = line.split(delimiter);
-        const [date, name, authorEmail, hash, message] = parts;
-        currentCommit = {
-          project: projectName,
-          hash: hash || '',
-          date: date || '',
-          message: message || '',
-          authorName: name || '',
-          authorEmail: authorEmail || '',
-          additions: 0,
-          deletions: 0,
-        };
-      } else if (currentCommit) {
-        // shortstat line: e.g. "1 file changed, 5 insertions(+), 3 deletions(-)"
-        const insMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
-        const delMatch = line.match(/(\d+)\s+deletions?\(-\)/);
-        currentCommit.additions = insMatch ? parseInt(insMatch[1], 10) : 0;
-        currentCommit.deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
+      if (!stdout.trim()) {
+        continue;
       }
-    }
-    if (currentCommit) {
-      results.push(currentCommit);
-    }
 
-    return results;
-  } catch (e) {
-    // If the repo has no commits, or is not in a valid state, return empty list
-    return [];
+      // 去掉 Windows 回车符 \r
+      const lines = stdout.replace(/\r/g, '').split('\n');
+
+      let currentCommit: CommitInfo | null = null;
+
+      for (const line of lines) {
+        // 跳过空行和纯空白行
+        if (line.trim().length === 0) continue;
+
+        if (line.includes(delimiter)) {
+          // New commit line
+          if (currentCommit) {
+            results.push(currentCommit);
+          }
+
+          const parts = line.split(delimiter);
+          const [date, name, authorEmail, hash, ...msgParts] = parts;
+          const message = msgParts.join(delimiter);
+          currentCommit = {
+            project: projectName,
+            hash: hash || '',
+            date: date || '',
+            message: message || '',
+            authorName: name || '',
+            authorEmail: authorEmail || '',
+            additions: 0,
+            deletions: 0,
+            branch: branch.name,
+            branches: branch.name !== 'unknown' ? [branch.name] : [],
+          };
+        } else if (currentCommit) {
+          // shortstat line: e.g. "1 file changed, 5 insertions(+), 3 deletions(-)"
+          const insMatch = line.match(/(\d+)\s+insertions?\(\+\)/);
+          const delMatch = line.match(/(\d+)\s+deletions?\(-\)/);
+          currentCommit.additions = insMatch ? parseInt(insMatch[1], 10) : 0;
+          currentCommit.deletions = delMatch ? parseInt(delMatch[1], 10) : 0;
+        }
+      }
+      if (currentCommit) {
+        results.push(currentCommit);
+      }
+    } catch {
+      // Ignore branches that cannot be read.
+    }
   }
+
+  return results;
 }
 
 export function getLocalGitIdentity(): { emails: string[]; names: string[] } {

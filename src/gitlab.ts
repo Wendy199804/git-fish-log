@@ -25,6 +25,10 @@ interface GitLabCommitDetail extends GitLabCommit {
   };
 }
 
+interface GitLabBranch {
+  name: string;
+}
+
 interface GitLabUser {
   id: number;
   username: string;
@@ -145,17 +149,9 @@ export async function fetchGitLabCommits(since: Date, until: Date, source?: stri
 
     const commitPromises = projects.map(async (project) => {
       try {
-        const commitsUrl = `${cleanHost}/api/v4/projects/${project.id}/repository/commits?since=${sinceStr}&until=${untilStr}&per_page=100&all=true`;
-        const commitsRes = await gitLabFetch<GitLabCommit[]>(commitsUrl, { 'PRIVATE-TOKEN': token });
-        if (!commitsRes.ok) {
-          return [];
-        }
-        const commits = await commitsRes.json();
-
         const localIdentity = getLocalGitIdentity();
 
-        // Filter commits written by the user
-        const userCommits = commits.filter((c) => {
+        const isUserCommit = (c: GitLabCommit) => {
           const authorEmail = c.author_email.toLowerCase();
           const authorName = c.author_name.toLowerCase();
 
@@ -169,7 +165,41 @@ export async function fetchGitLabCommits(since: Date, until: Date, source?: stri
             localIdentity.names.includes(authorName);
 
           return matchesGitLab || matchesLocal;
-        });
+        };
+
+        let branchNames: string[] = [];
+        try {
+          const branchesUrl = `${cleanHost}/api/v4/projects/${project.id}/repository/branches?per_page=100`;
+          const branchesRes = await gitLabFetch<GitLabBranch[]>(branchesUrl, { 'PRIVATE-TOKEN': token });
+          if (branchesRes.ok) {
+            const branches = await branchesRes.json();
+            branchNames = branches.map(b => b.name).filter(Boolean);
+          }
+        } catch {
+          // Fallback below will still collect commit data when branch listing fails.
+        }
+
+        const branchCommitResults = branchNames.length > 0
+          ? await Promise.all(branchNames.map(async (branchName) => {
+              const commitsUrl = `${cleanHost}/api/v4/projects/${project.id}/repository/commits?ref_name=${encodeURIComponent(branchName)}&since=${sinceStr}&until=${untilStr}&per_page=100`;
+              const commitsRes = await gitLabFetch<GitLabCommit[]>(commitsUrl, { 'PRIVATE-TOKEN': token });
+              if (!commitsRes.ok) return [];
+              const commits = await commitsRes.json();
+              return commits
+                .filter(isUserCommit)
+                .map(c => ({ commit: c, branchName }));
+            }))
+          : await (async () => {
+              const commitsUrl = `${cleanHost}/api/v4/projects/${project.id}/repository/commits?since=${sinceStr}&until=${untilStr}&per_page=100&all=true`;
+              const commitsRes = await gitLabFetch<GitLabCommit[]>(commitsUrl, { 'PRIVATE-TOKEN': token });
+              if (!commitsRes.ok) return [];
+              const commits = await commitsRes.json();
+              return [commits
+                .filter(isUserCommit)
+                .map(c => ({ commit: c, branchName: 'gitlab' }))];
+            })();
+
+        const userCommits = branchCommitResults.flat();
 
         if (userCommits.length === 0) return [];
 
@@ -179,7 +209,7 @@ export async function fetchGitLabCommits(since: Date, until: Date, source?: stri
         for (let i = 0; i < userCommits.length; i += batchSize) {
           const batch = userCommits.slice(i, i + batchSize);
           const batchResults = await Promise.all(
-            batch.map(async (c) => {
+            batch.map(async ({ commit: c, branchName }) => {
               let adds = 0;
               let dels = 0;
               try {
@@ -204,6 +234,8 @@ export async function fetchGitLabCommits(since: Date, until: Date, source?: stri
                 authorEmail: c.author_email,
                 additions: adds,
                 deletions: dels,
+                branch: branchName,
+                branches: [branchName],
               } as CommitInfo;
             })
           );

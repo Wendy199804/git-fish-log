@@ -12,6 +12,9 @@ export interface WeekDayStats {
   builder: number;
   burst: number;
   density: number;
+  codeVolume: number;
+  totalLines: number;
+  branchCount: number;
   tags: string[];
 }
 
@@ -26,6 +29,7 @@ export interface WeeklyStats {
   averageNightOwl: number;
   averageBuilder: number;
   averageBurst: number;
+  averageCodeVolume: number;
   ghostCommitsCount: number;
 }
 
@@ -36,6 +40,8 @@ export interface DailyMonthStat {
   hardworking: number;
   nightOwl: number;
   burst: number;
+  codeVolume: number;
+  totalLines: number;
   tags: string[];
 }
 
@@ -54,6 +60,7 @@ export interface MonthlyStats {
   averageNightOwl: number;
   averageBuilder: number;
   averageBurst: number;
+  averageCodeVolume: number;
   dailyIndices: DailyMonthStat[];
 }
 
@@ -155,6 +162,8 @@ export interface DayIndices {
   builder: number;
   burst: number;
   density: number;
+  codeVolume: number;
+  totalLines: number;
   tags: string[];
 }
 
@@ -176,6 +185,8 @@ export function calculateDayIndices(
       builder: 0,
       burst: 0,
       density: 0,
+      codeVolume: 0,
+      totalLines: 0,
       tags: ['🐟 今日暂无代码活动'],
     };
   }
@@ -262,6 +273,10 @@ export function calculateDayIndices(
   // 🧱 搬砖指数：行数 60% + 有效提交 40%
   const builder = Math.min(100, Math.round(lineBonus * 0.6 + commitScore * 0.4));
 
+  // 🧱 代码量指数：纯修改规模，log₁₀ 对数压缩，与摸鱼指数完全解耦
+  // 公式: 51.3 * log10(L + 50) - 79.5, clamped to [0, 100]
+  const codeVolume = Math.min(100, Math.max(0, Math.round(51.3 * Math.log10(L + 50) - 79.5)));
+
   // 💥 爆发指数：总平均行数衡量单次提交量
   const displayAvgLines = Math.round(L / Math.max(N, 1));
   const burst = Math.min(100, Math.round(Math.log2(displayAvgLines + 1) * 12));
@@ -293,6 +308,8 @@ export function calculateDayIndices(
     builder,
     burst,
     density: Math.round(spreadScore),
+    codeVolume,
+    totalLines: L,
     tags,
   };
 }
@@ -311,12 +328,26 @@ export async function getAllCommits(projectPaths: string[], since: Date, until: 
     // Ignore and fallback
   }
 
-  // Deduplicate by hash
-  const seen = new Set<string>();
+  // Deduplicate commits but keep every branch where the commit was observed.
+  const seen = new Map<string, CommitInfo>();
   const unique: CommitInfo[] = [];
   for (const c of all) {
-    if (!seen.has(c.hash)) {
-      seen.add(c.hash);
+    const key = `${c.project}:${c.hash}`;
+    const branches = c.branches && c.branches.length > 0
+      ? c.branches
+      : (c.branch && c.branch !== 'unknown' ? [c.branch] : []);
+    const existing = seen.get(key);
+    if (existing) {
+      const mergedBranches = new Set([
+        ...(existing.branches || (existing.branch && existing.branch !== 'unknown' ? [existing.branch] : [])),
+        ...branches,
+      ]);
+      existing.branches = Array.from(mergedBranches);
+      existing.branch = existing.branches[0] || existing.branch;
+    } else {
+      c.branches = Array.from(new Set(branches));
+      c.branch = c.branches[0] || c.branch;
+      seen.set(key, c);
       unique.push(c);
     }
   }
@@ -343,6 +374,14 @@ export async function analyzeWeekly(projectPaths: string[], now: Date = new Date
     const dayCommits = commitsByDay[idx];
     const projects = Array.from(new Set(dayCommits.map(c => c.project)));
     const indices = calculateDayIndices(dayCommits, idx >= 5);
+    const branches = new Set(
+      dayCommits.flatMap(c => {
+        const commitBranches = c.branches && c.branches.length > 0
+          ? c.branches
+          : (c.branch && c.branch !== 'unknown' ? [c.branch] : []);
+        return commitBranches.map(branch => `${c.project}:${branch}`);
+      })
+    );
 
     return {
       dayName: name,
@@ -354,6 +393,9 @@ export async function analyzeWeekly(projectPaths: string[], now: Date = new Date
       builder: indices.builder,
       burst: indices.burst,
       density: indices.density,
+      codeVolume: indices.codeVolume,
+      totalLines: indices.totalLines,
+      branchCount: branches.size,
       tags: indices.tags,
     };
   });
@@ -413,12 +455,14 @@ export async function analyzeWeekly(projectPaths: string[], now: Date = new Date
   const sumNightOwl = activeDays.reduce((acc, d) => acc + d.nightOwl, 0);
   const sumBuilder = activeDays.reduce((acc, d) => acc + d.builder, 0);
   const sumBurst = activeDays.reduce((acc, d) => acc + d.burst, 0);
+  const sumCodeVolume = activeDays.reduce((acc, d) => acc + d.codeVolume, 0);
   const activeCount = activeDays.length || 1;
   const averageFish = Math.round(sumFish / activeCount);
   const averageHardworking = Math.round(sumHardworking / activeCount);
   const averageNightOwl = Math.round(sumNightOwl / activeCount);
   const averageBuilder = Math.round(sumBuilder / activeCount);
   const averageBurst = Math.round(sumBurst / activeCount);
+  const averageCodeVolume = Math.round(sumCodeVolume / activeCount);
 
   return {
     days,
@@ -431,6 +475,7 @@ export async function analyzeWeekly(projectPaths: string[], now: Date = new Date
     averageNightOwl,
     averageBuilder,
     averageBurst,
+    averageCodeVolume,
     ghostCommitsCount: ghostCount,
   };
 }
@@ -482,6 +527,7 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
   let totalNightOwl = 0;
   let totalBuilder = 0;
   let totalBurst = 0;
+  let totalCodeVolume = 0;
   const dailyIndices: DailyMonthStat[] = [];
 
   for (let d = 1; d <= maxDay; d++) {
@@ -493,6 +539,7 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
     totalNightOwl += indices.nightOwl;
     totalBuilder += indices.builder;
     totalBurst += indices.burst;
+    totalCodeVolume += indices.codeVolume;
     dailyIndices.push({
       day: d,
       commitsCount: dayCommits.length,
@@ -500,6 +547,8 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
       hardworking: indices.hardworking,
       nightOwl: indices.nightOwl,
       burst: indices.burst,
+      codeVolume: indices.codeVolume,
+      totalLines: indices.totalLines,
       tags: indices.tags,
     });
   }
@@ -509,6 +558,7 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
   const averageNightOwl = Math.round(totalNightOwl / maxDay);
   const averageBuilder = Math.round(totalBuilder / maxDay);
   const averageBurst = Math.round(totalBurst / maxDay);
+  const averageCodeVolume = Math.round(totalCodeVolume / maxDay);
 
   return {
     totalCommits: commits.length,
@@ -520,6 +570,7 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
     averageNightOwl,
     averageBuilder,
     averageBurst,
+    averageCodeVolume,
     dailyIndices,
   };
 }
