@@ -533,7 +533,9 @@ export async function analyzeMonthly(projectPaths: string[], now: Date = new Dat
   for (let d = 1; d <= maxDay; d++) {
     const dateStr = `${since.getFullYear()}-${since.getMonth() + 1}-${d}`;
     const dayCommits = commitsByDateStr[dateStr] || [];
-    const indices = calculateDayIndices(dayCommits, false);
+    const dayDate = new Date(since.getFullYear(), since.getMonth(), d);
+    const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+    const indices = calculateDayIndices(dayCommits, isWeekend);
     totalFish += indices.fish;
     totalHardworking += indices.hardworking;
     totalNightOwl += indices.nightOwl;

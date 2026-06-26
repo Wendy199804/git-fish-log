@@ -22,7 +22,7 @@ import {
   WeekDayStats,
 } from './analyzer.js';
 import { getAICritic, getAICriticForMonth } from './critic.js';
-import { isHoliday, isCompensatoryWorkday } from './holiday.js';
+import { isHoliday, isCompensatoryWorkday, isRestDay } from './holiday.js';
 
 const program = new Command();
 
@@ -342,7 +342,7 @@ async function runWeeklyReport(weeksAgo: number, source?: string, showProjects: 
     } else {
       const projStr =
         day.projects.length > 0
-          ? ` | ${day.projects.length}个项目${showProjects ? ` (${day.projects.join(', ')})` : ''}`
+          ? ` | ${day.projects.length}个项目 (${day.projects.join(', ')})`
           : '';
       const commitStr = day.commitsCount > 0 ? chalk.white.bold(`${day.commitsCount} 次`) : '0 次';
 
@@ -379,7 +379,7 @@ async function runWeeklyReport(weeksAgo: number, source?: string, showProjects: 
   if (stats.totalCommits > 0) {
     // ── 最努力 & 最快乐：只统计已到的天（排除"未到"的未来天） ──
     const activeDays = stats.days.filter((_, idx) => idx <= currentDayOfWeek);
-    const workingDays = activeDays.filter(d => d.commitsCount > 0);
+    const workingDays = activeDays.filter(d => d.commitsCount > 0 && d.dayName !== '周六' && d.dayName !== '周日');
 
     // 最努力：从有提交的天中取摸鱼指数最低，整周都闲则不必展示
     if (workingDays.length > 0) {
@@ -390,9 +390,7 @@ async function runWeeklyReport(weeksAgo: number, source?: string, showProjects: 
       if (minFish <= 40 && mostProductiveDays.length > 0) {
         const names = mostProductiveDays.map(d => d.dayName).join('、');
         const sample = mostProductiveDays[0];
-        const isWeekend = sample.dayName === '周六' || sample.dayName === '周日';
-        const label = isWeekend ? '💼 加班指数' : '🐟 摸鱼指数';
-        console.log(`🏆 ${chalk.red.bold('最努力的日子')}：${names} | ${label}：${sample.fish}%`);
+        console.log(`🏆 ${chalk.red.bold('最努力的日子')}：${names} | 🐟 摸鱼指数：${sample.fish}%`);
       }
     }
 
@@ -545,9 +543,50 @@ async function runMonthlyReport(monthsAgo: number, source?: string) {
 
   }
 
-  console.log('\n' + chalk.gray('-'.repeat(50)));
+  // ── 爆肝王 & 摸鱼王（排除无提交的休息日，有提交算加班）──
+  let adjustedAvgFish: number | undefined;
+  if (stats.dailyIndices && stats.dailyIndices.length > 0) {
+    const activeDailyIndices = stats.dailyIndices.filter(d => {
+      const dateObj = new Date(targetDate.getFullYear(), targetDate.getMonth(), d.day);
+      // 休息日（周末+节假日）且无提交 → 排除；休息日有提交 → 加班，保留
+      if (isRestDay(dateObj) && d.commitsCount === 0) return false;
+      return true;
+    });
+
+    if (activeDailyIndices.length > 0) {
+      // 爆肝王 = 摸鱼指数最低（最努力干活）
+      const minFish = Math.min(...activeDailyIndices.map(d => d.fish));
+      const mostProductive = activeDailyIndices.filter(d => d.fish === minFish);
+      if (minFish <= 40 && mostProductive.length > 0) {
+        const names = mostProductive.map(d => `${d.day}日`).join('、');
+        const monthLabel = `${targetDate.getMonth() + 1}月`;
+        console.log(`\n🏆 ${chalk.red.bold('爆肝王')}：${monthLabel}${names} | 🐟 摸鱼指数：${minFish}%`);
+      }
+
+      // 摸鱼王 = 摸鱼指数最高（最会摸鱼）
+      const maxFish = Math.max(...activeDailyIndices.map(d => d.fish));
+      const mostSlacky = activeDailyIndices.filter(d => d.fish === maxFish);
+      const filteredSlacky = mostSlacky.filter(
+        d => d.fish !== minFish || activeDailyIndices.length === 0
+      );
+      if (maxFish >= 70 && filteredSlacky.length > 0) {
+        const names = filteredSlacky.map(d => `${d.day}日`).join('、');
+        const monthLabel = `${targetDate.getMonth() + 1}月`;
+        console.log(`☕ ${chalk.green.bold('摸鱼王')}：${monthLabel}${names} | 🐟 摸鱼指数：${maxFish}%`);
+      }
+
+      // 调整后均值（排除无提交的休息日）
+      adjustedAvgFish = Math.round(
+        activeDailyIndices.reduce((sum, d) => sum + d.fish, 0) / activeDailyIndices.length
+      );
+      console.log('' + chalk.gray('-'.repeat(50)));
+      console.log(chalk.cyan.bold(`📊 本月均值：🐟 摸鱼指数 ${adjustedAvgFish}%`));
+    }
+  }
+
+  console.log(chalk.gray('-'.repeat(50)));
   console.log(`🤖 ${chalk.magenta.bold('锐评')}：`);
-  console.log(chalk.white(getAICriticForMonth(stats)));
+  console.log(chalk.white(getAICriticForMonth(stats, adjustedAvgFish)));
   console.log('');
 }
 

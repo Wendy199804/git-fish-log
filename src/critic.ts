@@ -205,7 +205,7 @@ export function getAICritic(weeklyStats: WeeklyStats): string {
   return parts.join("\n\n");
 }
 
-export function getAICriticForMonth(monthlyStats: MonthlyStats): string {
+export function getAICriticForMonth(monthlyStats: MonthlyStats, adjustedFish?: number): string {
   const parts: string[] = [];
 
   // Check ghost commits
@@ -213,12 +213,14 @@ export function getAICriticForMonth(monthlyStats: MonthlyStats): string {
     parts.push(getRandomItem(GHOST_CRITIQUES));
   }
 
+  const fish = adjustedFish ?? monthlyStats.averageFish;
+
   // Slack level evaluation
   if (monthlyStats.totalCommits === 0) {
     parts.push("本月提交次数为 0！你成功地在公司蒸发了一个月，拿到了全额工资。建议你下个月继续保持低调，不要让 HR 注意到你。");
-  } else if (monthlyStats.averageFish >= 70) {
+  } else if (fish >= 70) {
     parts.push(getRandomItem(SLACK_HIGH_CRITIQUES));
-  } else if (monthlyStats.averageFish <= 35) {
+  } else if (fish <= 35) {
     parts.push(getRandomItem(SLACK_LOW_CRITIQUES));
   }
 
