@@ -144,6 +144,8 @@ export function getAICritic(weeklyStats: WeeklyStats): string {
   // ── 标签锐评：收集本周所有标签，每个标签最多一条 ──
   const tagCritics = getTagCriticsFromDays(weeklyStats.days);
   if (tagCritics.length > 0) {
+    // 用分隔线与上方总评隔开
+    parts.push('─'.repeat(50));
     parts.push(...tagCritics.slice(0, 2)); // 最多展示 2 条标签锐评
   }
 

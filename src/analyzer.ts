@@ -133,7 +133,20 @@ export function categorizeCommit(message: string): 'fix' | 'feat' | 'chore' | 'o
   return 'other';
 }
 
-// ──────────────────────── 新算法：多维指数 ────────────────────────
+// ──────────────────────── 新算法 v2：摸鱼指数重设计 ────────────────────────
+//
+// 设计目标（按直觉感受对齐）：
+//   fish 95~100  = 几乎没干活
+//   fish 70~85   = 小需求、小修复，整体悠闲
+//   fish 40~60   = 正常搬砖
+//   fish 20~40   = 爆肝工作
+//   fish 0~20    = 通宵上线、人形 CI/CD
+//
+// 核心原则：
+//   1. "有效 Commit"（增删 ≥ 20 行）才算实质提交，过滤格式化/小修复
+//   2. 行数用 log₁₀ 压缩 + 降权至 10%，避免 200 行被误判为大量工作
+//   3. 工作时长(30%) + 小时分布(20%) = 50% 权重，体现持续投入
+//   4. 工作日自然存在摸鱼基线，0 commit → fish=95
 
 export interface DayIndices {
   fish: number;
@@ -146,14 +159,7 @@ export interface DayIndices {
 }
 
 /**
- * 计算单日多维度指数
- *
- * 设计目标：
- * - 对数衰减防刷 commit
- * - 平方根防时间跨度作弊
- * - 引入代码行数 (additions + deletions)
- * - 深夜 / 周末加成
- * - 隐藏成就 & 人格标签
+ * 计算单日多维度指数（v2 重设计版）
  */
 export function calculateDayIndices(
   commits: CommitInfo[],
@@ -161,11 +167,11 @@ export function calculateDayIndices(
 ): DayIndices {
   const N = commits.length;
 
-  // ── 0 commit：大概率摸鱼但不给 100 ──
+  // ── 0 commit：摸鱼基线 95 ──
   if (N === 0) {
     return {
-      fish: 90,
-      hardworking: 10,
+      fish: 95,
+      hardworking: 5,
       nightOwl: 0,
       builder: 0,
       burst: 0,
@@ -174,12 +180,13 @@ export function calculateDayIndices(
     };
   }
 
-  // 提取最早/最晚时间、总代码行数、深夜计数
+  // ── 提取原始数据 ──
   let earliest = 24;
   let latest = 0;
   let totalAdditions = 0;
   let totalDeletions = 0;
   let nightCount = 0;
+  const hourSet = new Set<number>();
 
   for (const commit of commits) {
     const parsed = parseGitISODate(commit.date);
@@ -189,66 +196,79 @@ export function calculateDayIndices(
     if (parsed.hour >= 0 && parsed.hour <= 5) nightCount++;
     totalAdditions += commit.additions;
     totalDeletions += commit.deletions;
+    hourSet.add(parsed.hour);
   }
 
-  const S = Math.max(0.1, latest - earliest);   // 时间跨度（小时）
-  const L = totalAdditions + totalDeletions;     // 总修改行数
-  const avgLines = L / Math.max(N, 1);           // 平均每次修改行数
-  const D = N / (S + 1);                         // 密度
+  const S = Math.max(0.1, latest - earliest);  // 时间跨度（小时）
+  const L = totalAdditions + totalDeletions;    // 总修改行数
+  const activeHours = hourSet.size;             // 有 commit 的小时数
 
-  // ── 各项基础得分（0 ~ 100）──
+  // ── 有效 Commit 统计（单次增删 ≥ 20 行）──
+  let Neff = 0;
+  for (const commit of commits) {
+    const cl = commit.additions + commit.deletions;
+    if (cl >= 20) {
+      Neff++;
+    }
+  }
 
-  // 1. Commit 活跃度
-  const commitScore = Math.min(100, Math.log2(N + 1) * 18);
+  // ═══════════════════════════════════════════
+  // 子分数计算（各项 0~100）
+  // ═══════════════════════════════════════════
 
-  // 2. 工时跨度得分
-  const spanScore = Math.min(100, Math.sqrt(S) * 18);
+  // I₁ 有效提交分：基于有效 Commit 数量，对数防刷
+  const commitScore = Math.min(100, Math.log2(Neff + 1) * 20);
 
-  // 3. 代码活跃度
-  const lineScore = Math.min(100, Math.log2(L + 1) * 8);
+  // I₂ 工时跨度分：平方根防作弊
+  const spanScore = Math.min(100, Math.sqrt(S) * 22);
 
-  // 4. Commit 密度得分（N <= 1 时为 0）
-  const densityScore = N <= 1 ? 0 : Math.min(100, D * 35);
+  // I₃ 时间分布分：有 commit 的小时数越多，说明持续投入
+  const spreadScore = Math.min(100, activeHours * 12);
 
-  // 5. 修仙得分
-  const nightScore = Math.min(100, nightCount * 30);
+  // I₄ 代码行数加分：log₁₀ 重度压缩，权重仅 10%
+  const lineBonus = Math.min(100, Math.log10(L + 1) * 25);
 
-  // ── 最终指数 ──
+  // I₅ 深夜加成：有深夜提交直接 +5 分
+  const nightBonus = nightCount > 0 ? 5 : 0;
 
-  // 🔥 爆肝指数
-  let hardworking = commitScore * 0.30
-    + lineScore * 0.30
-    + densityScore * 0.20
-    + spanScore * 0.20;
+  // ═══════════════════════════════════════════
+  // 工作分 = 加权求和
+  // ═══════════════════════════════════════════
+  let workScore =
+    commitScore * 0.35 +
+    spanScore * 0.30 +
+    spreadScore * 0.20 +
+    lineBonus * 0.10 +
+    nightBonus;
 
   // 周末额外加成
   if (isWeekend && N > 0) {
-    hardworking += 8;
+    workScore += 5;
   }
 
-  hardworking = Math.min(100, Math.round(hardworking));
-
-  // 🐟 摸鱼指数
+  const hardworking = Math.min(100, Math.round(workScore));
   const fish = Math.max(1, 100 - hardworking);
 
-  // 🌙 修仙指数：无深夜提交则为 0，不与白天活动跨度假量混算
+  // ═══════════════════════════════════════════
+  // 其他维度指数
+  // ═══════════════════════════════════════════
+
+  // 🌙 修仙指数
+  const nightScore = Math.min(100, nightCount * 30);
   const nightOwl = nightCount === 0
     ? 0
-    : Math.min(100, Math.round(
-        nightScore * 0.7 + spanScore * 0.3
-      ));
+    : Math.min(100, Math.round(nightScore * 0.7 + spanScore * 0.3));
 
-  // 🧱 搬砖指数
-  const builder = Math.min(100, Math.round(
-    lineScore * 0.7 + commitScore * 0.3
-  ));
+  // 🧱 搬砖指数：行数 60% + 有效提交 40%
+  const builder = Math.min(100, Math.round(lineBonus * 0.6 + commitScore * 0.4));
 
-  // 💥 爆发指数（对数防一把梭刷行数）
-  const burst = Math.min(100, Math.round(
-    Math.log2(avgLines + 1) * 12
-  ));
+  // 💥 爆发指数：总平均行数衡量单次提交量
+  const displayAvgLines = Math.round(L / Math.max(N, 1));
+  const burst = Math.min(100, Math.round(Math.log2(displayAvgLines + 1) * 12));
 
-  // ── 人格标签系统 ──
+  // ═══════════════════════════════════════════
+  // 人格标签系统
+  // ═══════════════════════════════════════════
   const tags: string[] = [];
 
   // 主要人格标签
@@ -256,15 +276,15 @@ export function calculateDayIndices(
   if (hardworking >= 80)    tags.push('🔥 爆肝战神');
   if (nightOwl >= 80)       tags.push('🌙 深夜修仙者');
   if (builder >= 80)        tags.push('🧱 勤恳搬砖人');
-  if (burst >= 80 && N <= 2) tags.push(`💥 一把梭哈型程序员 (均${Math.round(avgLines)}行/次)`);
+  if (burst >= 80 && N <= 2) tags.push(`💥 一把梭哈型程序员 (均${displayAvgLines}行/次)`);
 
-  // 隐藏成就
-  if (commitScore >= 70 && lineScore <= 15)        tags.push('🏷️ PPT 架构师');
-  if (N >= 10 && L <= 30)                           tags.push('🏷️ 格式化大师');
-  if (N >= 15 && avgLines <= 2)                     tags.push('🏷️ Git 聊天达人');
-  if (nightOwl >= 80 && N <= 3)                     tags.push('🏷️ 深夜刺客');
+  // 隐藏成就（适配有效 Commit 概念）
+  if (N >= 8 && Neff <= 1 && L <= 50)               tags.push('🏷️ PPT 架构师');
+  if (N >= 10 && L <= 30)                             tags.push('🏷️ 格式化大师');
+  if (N >= 15 && (L / N) <= 2)                        tags.push('🏷️ Git 聊天达人');
+  if (nightOwl >= 80 && N <= 3)                       tags.push('🏷️ 深夜刺客');
   if (hardworking >= 90 && nightOwl >= 70 && isWeekend) tags.push('🏷️ 生产队的驴');
-  if (fish >= 95 && N <= 1)                         tags.push('🏷️ 摸鱼仙人');
+  if (fish >= 95 && N <= 1)                           tags.push('🏷️ 摸鱼仙人');
 
   return {
     fish,
@@ -272,7 +292,7 @@ export function calculateDayIndices(
     nightOwl,
     builder,
     burst,
-    density: Math.round(Math.min(100, densityScore)),
+    density: Math.round(spreadScore),
     tags,
   };
 }

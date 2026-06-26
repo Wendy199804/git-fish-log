@@ -162,7 +162,7 @@ function colorizeFishRow(row: string): string {
       result += chunk;
     } else if (val >= 80) {
       result += chalk.green(chunk);
-    } else if (val >= 50) {
+    } else if (val >= 40) {
       result += chalk.yellow(chunk);
     } else {
       result += chalk.red(chunk);
