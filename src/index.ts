@@ -22,6 +22,7 @@ import {
   WeekDayStats,
 } from './analyzer.js';
 import { getAICritic, getAICriticForMonth } from './critic.js';
+import { isHoliday, isCompensatoryWorkday } from './holiday.js';
 
 const program = new Command();
 
@@ -505,7 +506,22 @@ async function runMonthlyReport(monthsAgo: number, source?: string) {
       const fishRaw = `${d.fish}%`;
       const columnIndex = (firstDayOffset + d.day - 1) % 7;
 
-      dateRow += visualPad(dateRaw, COL_WIDTH);
+      // 节假日加绿色圆点，调休班加红色感叹号
+      const dateObj = new Date(targetDate.getFullYear(), targetDate.getMonth(), d.day);
+      let suffix = '';
+      let suffixPlain = '';
+      if (isHoliday(dateObj)) {
+        suffix = chalk.green('•');
+        suffixPlain = '•';
+      } else if (isCompensatoryWorkday(dateObj)) {
+        suffix = chalk.red('!');
+        suffixPlain = '!';
+      }
+      // 基于纯文本计算 padding，避免 ANSI 转义码影响对齐
+      const plainText = dateRaw + suffixPlain;
+      const vw = visualWidth(plainText);
+      const padding = vw < COL_WIDTH ? ' '.repeat(COL_WIDTH - vw) : '';
+      dateRow += dateRaw + suffix + padding;
       fishRow += visualPad(fishRaw, COL_WIDTH);
 
       // 周日换行；最后一天即使不满一周也输出
@@ -526,18 +542,7 @@ async function runMonthlyReport(monthsAgo: number, source?: string) {
       console.log(`  ${l}`);
     }
 
-    // 高亮标注：摸鱼王 & 爆肝王
-    const dailyWithCommits = stats.dailyIndices.filter(d => d.commitsCount > 0);
-    if (dailyWithCommits.length > 0) {
-      const mostFish = [...dailyWithCommits].sort((a, b) => b.fish - a.fish)[0];
-      const mostWork = [...dailyWithCommits].sort((a, b) => a.fish - b.fish)[0];
-      if (mostFish.fish >= 75) {
-        console.log(chalk.green(`\n  🎣 摸鱼王: ${monthLabel}${mostFish.day}日 → 摸鱼指数 ${mostFish.fish}%` + (mostFish.tags.length > 0 ? ` ${mostFish.tags.join(' ')}` : '')));
-      }
-      if (mostWork.fish <= 40) {
-        console.log(chalk.red(`\n  🔥 爆肝王: ${monthLabel}${mostWork.day}日 → 摸鱼指数 ${mostWork.fish}%` + (mostWork.tags.length > 0 ? ` ${mostWork.tags.join(' ')}` : '')));
-      }
-    }
+
   }
 
   console.log('\n' + chalk.gray('-'.repeat(50)));

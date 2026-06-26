@@ -213,24 +213,6 @@ export function getAICriticForMonth(monthlyStats: MonthlyStats): string {
     parts.push(getRandomItem(GHOST_CRITIQUES));
   }
 
-  // Find dominant category
-  const { fix, feat, chore, other } = monthlyStats.categories;
-  const total = fix + feat + chore + other;
-  
-  if (total > 0) {
-    const fixPct = Math.round((fix / total) * 100);
-    const featPct = Math.round((feat / total) * 100);
-    const chorePct = Math.round((chore / total) * 100);
-
-    if (fixPct >= 50) {
-      parts.push(getRandomItem(CATEGORY_FIX_CRITIQUES).replace("%PERCENT%%", `${fixPct}%`));
-    } else if (featPct >= 50) {
-      parts.push(getRandomItem(CATEGORY_FEAT_CRITIQUES).replace("%PERCENT%%", `${featPct}%`));
-    } else if (chorePct >= 40) {
-      parts.push(getRandomItem(CATEGORY_CHORE_CRITIQUES).replace("%PERCENT%%", `${chorePct}%`));
-    }
-  }
-
   // Slack level evaluation
   if (monthlyStats.totalCommits === 0) {
     parts.push("本月提交次数为 0！你成功地在公司蒸发了一个月，拿到了全额工资。建议你下个月继续保持低调，不要让 HR 注意到你。");
