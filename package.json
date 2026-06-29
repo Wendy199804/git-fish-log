@@ -1,6 +1,6 @@
 {
   "name": "git-fish-log",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "🐟 Git 摸鱼 & 爆肝分析器 CLI — 给你的提交记录生成摸鱼指数和锐评",
   "type": "module",
   "main": "./dist/index.js",
